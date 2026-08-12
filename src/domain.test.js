@@ -1,0 +1,28 @@
+import { describe, expect, it } from 'vitest'
+import { bestQuartile, buildDemoState, computeStats, parseJournalCsv } from './domain.js'
+
+describe('paper trail domain', () => {
+  it('keeps paper count separate from submission attempts', () => {
+    const stats = computeStats(buildDemoState())
+    expect(stats.papers).toBe(3)
+    expect(stats.attempts).toBe(4)
+  })
+
+  it('uses the best JCR category quartile', () => {
+    expect(bestQuartile({ categories: [{ quartile: 'Q3' }, { quartile: 'Q1' }] })).toBe('Q1')
+  })
+
+  it('imports multiple JCR categories for one journal', () => {
+    const csv = 'journal,issn,publisher,jcrYear,jif,category,quartile,rank,total\nTest Journal,1234-5678,Test,2025,8.2,Biology,Q1,10,100\nTest Journal,1234-5678,Test,2025,8.2,Medicine,Q2,40,120'
+    const journals = parseJournalCsv(csv)
+    expect(journals).toHaveLength(1)
+    expect(journals[0].metrics[0].categories).toHaveLength(2)
+  })
+
+  it('handles quoted journal names and categories containing commas', () => {
+    const csv = 'journal,issn,publisher,jcrYear,jif,category,quartile,rank,total\n"Journal, Advanced",1234-5678,Test,2025,8.2,"Education, Scientific Disciplines",Q1,10,100'
+    const journals = parseJournalCsv(csv)
+    expect(journals[0].name).toBe('Journal, Advanced')
+    expect(journals[0].metrics[0].categories[0].name).toBe('Education, Scientific Disciplines')
+  })
+})
