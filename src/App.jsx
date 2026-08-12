@@ -72,6 +72,8 @@ const NAV_ITEMS = [
   { id: 'backup', label: '备份', icon: ArchiveRestore },
 ]
 
+const ROLE_CHART_COLORS = ['#232d4b', '#5477a6', '#7f91aa', '#8b91a2', '#b1824d', '#cfd3d8']
+
 const PAGE_META = {
   dashboard: { eyebrow: 'OVERVIEW', title: '我的投稿轨迹', subtitle: '所有论文、状态与时间，都在一处。' },
   papers: { eyebrow: 'MANUSCRIPTS', title: '论文与投稿', subtitle: '一篇论文可以拥有多次独立投稿记录。' },
@@ -296,7 +298,7 @@ function InsightsPage({ data, setPage }) {
   const roleOption = {
     animationDuration: 650,
     tooltip: { trigger: 'item', backgroundColor: '#232d4b', borderWidth: 0, textStyle: { color: '#fff' } },
-    color: ['#232d4b', '#5477a6', '#8b91a2', '#b1824d', '#cfd3d8'],
+    color: ROLE_CHART_COLORS,
     series: [{ type: 'pie', radius: ['58%', '78%'], center: ['44%', '50%'], label: { show: false }, itemStyle: { borderColor: '#fff', borderWidth: 4 }, data: roleEntries.map(([name, value]) => ({ name, value })) }],
   }
   return <div className="insights-stack">
@@ -316,7 +318,7 @@ function InsightsPage({ data, setPage }) {
         <div className="section-title"><div><p className="eyebrow">AUTHORSHIP</p><h2>作者身份构成</h2></div></div>
         <div className="role-chart">
           {roleEntries.length ? <ReactEChartsCore echarts={echarts} option={roleOption} style={{ height: 245, width: 245 }} /> : <EmptyInline text="暂无作者身份数据" />}
-          <div className="role-legend">{roleEntries.map(([name, value], index) => <div key={name}><i style={{ '--role-color': ['#232d4b', '#5477a6', '#8b91a2', '#b1824d', '#cfd3d8'][index % 5] }} /><span>{name}</span><strong>{value}</strong></div>)}</div>
+          <div className="role-legend">{roleEntries.map(([name, value], index) => <div key={name}><i style={{ '--role-color': ROLE_CHART_COLORS[index % ROLE_CHART_COLORS.length] }} /><span>{name}</span><strong>{value}</strong></div>)}</div>
         </div>
       </article>
     </section>

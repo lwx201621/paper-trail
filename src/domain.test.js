@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { bestQuartile, buildDemoState, computeInsights, computeStats, parseJournalCsv } from './domain.js'
+import { ROLE_OPTIONS, bestQuartile, buildDemoState, computeInsights, computeStats, parseJournalCsv } from './domain.js'
 
 describe('paper trail domain', () => {
   it('keeps paper count separate from submission attempts', () => {
     const stats = computeStats(buildDemoState())
     expect(stats.papers).toBe(3)
     expect(stats.attempts).toBe(4)
+  })
+
+  it('offers second author as an authorship role', () => {
+    expect(ROLE_OPTIONS).toContain('第二作者')
   })
 
   it('uses the best JCR category quartile', () => {

@@ -21,7 +21,7 @@ export const STATUS_OPTIONS = [
 
 export const STATUS_MAP = Object.fromEntries(STATUS_OPTIONS.map((item) => [item.value, item]))
 
-export const ROLE_OPTIONS = ['第一作者', '共同一作', '通讯作者', '共同通讯', '其他作者']
+export const ROLE_OPTIONS = ['第一作者', '共同一作', '第二作者', '通讯作者', '共同通讯', '其他作者']
 
 export function uid(prefix = 'id') {
   return `${prefix}_${crypto.randomUUID()}`
