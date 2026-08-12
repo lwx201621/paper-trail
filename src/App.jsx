@@ -143,8 +143,8 @@ function AppShell({ page, setPage, data, children, onNewPaper, onNewConference }
       <header className="topbar">
         <div className="topbar-inner">
           <button className="wordmark" onClick={() => setPage('dashboard')} aria-label="返回总览">
-            <strong>WENXUAN LI</strong>
-            <span>Paper Trail</span>
+            <strong>PAPER TRAIL</strong>
+            <span>Submission Tracker</span>
           </button>
           <nav className="desktop-nav" aria-label="主导航">
             {NAV_ITEMS.map(({ id, label }) => (
@@ -218,7 +218,7 @@ function Dashboard({ data, setPage, onUpdate }) {
     animationDuration: 700,
     tooltip: { trigger: 'item', backgroundColor: '#232d4b', borderWidth: 0, textStyle: { color: '#fff' } },
     color: ['#232d4b', '#5477a6', '#b1824d', '#a95743', '#cfd3d8'],
-    series: [{ type: 'pie', radius: ['58%', '78%'], center: ['50%', '48%'], itemStyle: { borderColor: '#ffffff', borderWidth: 4 }, label: { show: false }, data: quartileData.length ? quartileData : [{ name: '暂无', value: 1, itemStyle: { color: '#e3e6ea' } }] }],
+    series: [{ type: 'pie', radius: ['58%', '78%'], center: ['50%', '50%'], itemStyle: { borderColor: '#ffffff', borderWidth: 4 }, label: { show: false }, data: quartileData.length ? quartileData : [{ name: '暂无', value: 1, itemStyle: { color: '#e3e6ea' } }] }],
   }
 
   return (
@@ -238,8 +238,10 @@ function Dashboard({ data, setPage, onUpdate }) {
         <article className="panel quartile-panel">
           <div className="panel-heading"><div><p className="eyebrow">JCR MIX</p><h2>当前投稿分区</h2></div></div>
           <div className="quartile-chart-wrap">
-            <ReactEChartsCore echarts={echarts} option={quartileOption} style={{ height: 210, width: 210 }} />
-            <div className="quartile-center"><strong>{stats.papers}</strong><span>篇论文</span></div>
+            <div className="quartile-visual">
+              <ReactEChartsCore echarts={echarts} option={quartileOption} style={{ height: 210, width: 210 }} />
+              <div className="quartile-center"><strong>{stats.papers}</strong><span>篇论文</span></div>
+            </div>
             <div className="quartile-legend">
               {Object.entries(stats.quartiles).map(([name, value]) => <div key={name}><QuartileBadge value={name === '未分区' ? '—' : name} muted={!value} /><span>{value} 篇</span></div>)}
             </div>
@@ -302,13 +304,6 @@ function InsightsPage({ data, setPage }) {
     series: [{ type: 'pie', radius: ['58%', '78%'], center: ['44%', '50%'], label: { show: false }, itemStyle: { borderColor: '#fff', borderWidth: 4 }, data: roleEntries.map(([name, value]) => ({ name, value })) }],
   }
   return <div className="insights-stack">
-    <section className="insight-kpis">
-      <article><span>投稿接收率</span><strong>{insights.acceptanceRate == null ? '—' : `${insights.acceptanceRate}%`}</strong><small>{insights.acceptedAttempts} 次接收 / {insights.rejectedAttempts} 次拒稿</small></article>
-      <article><span>首次决定中位数</span><strong>{insights.medianFirstDecision ?? '—'}<em>{insights.medianFirstDecision != null ? '天' : ''}</em></strong><small>从首次提交到首轮决定</small></article>
-      <article><span>接收周期中位数</span><strong>{insights.medianAcceptance ?? '—'}<em>{insights.medianAcceptance != null ? '天' : ''}</em></strong><small>从投稿到正式接收</small></article>
-      <article><span>累计修回轮次</span><strong>{insights.revisionRounds}</strong><small>大修与小修事件总计</small></article>
-    </section>
-
     <section className="analysis-grid">
       <article className="analysis-block">
         <div className="section-title"><div><p className="eyebrow">PIPELINE</p><h2>当前状态结构</h2></div><TrendingUp size={18} /></div>
