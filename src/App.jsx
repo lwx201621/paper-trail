@@ -6,9 +6,11 @@ import { GridComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import {
   ArchiveRestore,
+  AlertTriangle,
   ArrowUpRight,
   BarChart3,
   BookOpen,
+  CalendarDays,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -21,15 +23,20 @@ import {
   HardDrive,
   LayoutDashboard,
   Library,
+  LockKeyhole,
+  Pencil,
   Plus,
   Search,
   Send,
   ShieldCheck,
+  Timer,
+  TrendingUp,
   Trash2,
   Upload,
   X,
 } from 'lucide-react'
 import { loadState, saveState } from './db.js'
+import { decryptState, encryptState } from './backupCrypto.js'
 import {
   ROLE_OPTIONS,
   STATUS_MAP,
@@ -37,6 +44,7 @@ import {
   bestQuartile,
   buildDemoState,
   computeStats,
+  computeInsights,
   currentSubmission,
   daysBetween,
   emptyState,
@@ -51,6 +59,7 @@ echarts.use([BarChart, LineChart, PieChart, GridComponent, TooltipComponent, Can
 const NAV_ITEMS = [
   { id: 'dashboard', label: '总览', icon: LayoutDashboard },
   { id: 'papers', label: '论文', icon: FileText },
+  { id: 'insights', label: '分析', icon: BarChart3 },
   { id: 'journals', label: '期刊库', icon: Library },
   { id: 'backup', label: '备份', icon: ArchiveRestore },
 ]
@@ -58,6 +67,7 @@ const NAV_ITEMS = [
 const PAGE_META = {
   dashboard: { eyebrow: 'OVERVIEW', title: '我的投稿轨迹', subtitle: '所有论文、状态与时间，都在一处。' },
   papers: { eyebrow: 'MANUSCRIPTS', title: '论文与投稿', subtitle: '一篇论文可以拥有多次独立投稿记录。' },
+  insights: { eyebrow: 'INSIGHTS', title: '研究分析', subtitle: '从投稿周期、决策结果与成果结构理解你的研究进展。' },
   journals: { eyebrow: 'JOURNAL LIBRARY', title: '期刊指标库', subtitle: '按年度保存 JCR 指标与多学科分区。' },
   backup: { eyebrow: 'LOCAL DATA', title: '数据与备份', subtitle: '数据仅保存在当前浏览器中。' },
 }
@@ -256,11 +266,72 @@ function Dashboard({ data, setPage, onUpdate }) {
   )
 }
 
+function InsightsPage({ data, setPage }) {
+  const insights = useMemo(() => computeInsights(data), [data])
+  const statusEntries = Object.entries(insights.statusCounts).sort((a, b) => b[1] - a[1])
+  const roleEntries = Object.entries(insights.roleCounts).sort((a, b) => b[1] - a[1])
+  const publisherEntries = Object.entries(insights.publisherCounts).sort((a, b) => b[1] - a[1])
+  const statusOption = {
+    animationDuration: 650,
+    grid: { left: 8, right: 20, top: 10, bottom: 5, containLabel: true },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: '#232d4b', borderWidth: 0, textStyle: { color: '#fff' } },
+    xAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: '#e3e6ea', type: 'dashed' } }, axisLabel: { color: '#7a828c' } },
+    yAxis: { type: 'category', data: statusEntries.map(([name]) => name), axisTick: { show: false }, axisLine: { show: false }, axisLabel: { color: '#57606a', fontFamily: 'Helvetica Neue' } },
+    series: [{ type: 'bar', barWidth: 12, data: statusEntries.map(([, value]) => value), itemStyle: { color: '#232d4b', borderRadius: [0, 3, 3, 0] } }],
+  }
+  const roleOption = {
+    animationDuration: 650,
+    tooltip: { trigger: 'item', backgroundColor: '#232d4b', borderWidth: 0, textStyle: { color: '#fff' } },
+    color: ['#232d4b', '#5477a6', '#8b91a2', '#b1824d', '#cfd3d8'],
+    series: [{ type: 'pie', radius: ['58%', '78%'], center: ['44%', '50%'], label: { show: false }, itemStyle: { borderColor: '#fff', borderWidth: 4 }, data: roleEntries.map(([name, value]) => ({ name, value })) }],
+  }
+  return <div className="insights-stack">
+    <section className="insight-kpis">
+      <article><span>投稿接收率</span><strong>{insights.acceptanceRate == null ? '—' : `${insights.acceptanceRate}%`}</strong><small>{insights.acceptedAttempts} 次接收 / {insights.rejectedAttempts} 次拒稿</small></article>
+      <article><span>首次决定中位数</span><strong>{insights.medianFirstDecision ?? '—'}<em>{insights.medianFirstDecision != null ? '天' : ''}</em></strong><small>从首次提交到首轮决定</small></article>
+      <article><span>接收周期中位数</span><strong>{insights.medianAcceptance ?? '—'}<em>{insights.medianAcceptance != null ? '天' : ''}</em></strong><small>从投稿到正式接收</small></article>
+      <article><span>累计修回轮次</span><strong>{insights.revisionRounds}</strong><small>大修与小修事件总计</small></article>
+    </section>
+
+    <section className="analysis-grid">
+      <article className="analysis-block">
+        <div className="section-title"><div><p className="eyebrow">PIPELINE</p><h2>当前状态结构</h2></div><TrendingUp size={18} /></div>
+        {statusEntries.length ? <ReactEChartsCore echarts={echarts} option={statusOption} style={{ height: 260 }} /> : <EmptyInline text="录入投稿后显示状态结构" />}
+      </article>
+      <article className="analysis-block">
+        <div className="section-title"><div><p className="eyebrow">AUTHORSHIP</p><h2>作者身份构成</h2></div></div>
+        <div className="role-chart">
+          {roleEntries.length ? <ReactEChartsCore echarts={echarts} option={roleOption} style={{ height: 245, width: 245 }} /> : <EmptyInline text="暂无作者身份数据" />}
+          <div className="role-legend">{roleEntries.map(([name, value], index) => <div key={name}><i style={{ '--role-color': ['#232d4b', '#5477a6', '#8b91a2', '#b1824d', '#cfd3d8'][index % 5] }} /><span>{name}</span><strong>{value}</strong></div>)}</div>
+        </div>
+      </article>
+    </section>
+
+    <section className="analysis-grid lower-analysis">
+      <article className="analysis-block attention-block">
+        <div className="section-title"><div><p className="eyebrow">ATTENTION</p><h2>需要留意</h2></div><span>{insights.attention.length}</span></div>
+        <div className="attention-list">
+          {insights.attention.slice(0, 8).map((item) => <div className={`attention-row severity-${item.severity}`} key={item.id}><i /><div><strong>{item.paper.shortTitle}</strong><span>{item.kind} · {item.detail}</span></div><small>{item.submission.journalName}</small></div>)}
+          {!insights.attention.length && <div className="all-clear"><CheckCircle2 size={21} /><div><strong>目前没有需要处理的事项</strong><span>截止日期、长期停留和缺失信息会出现在这里。</span></div></div>}
+        </div>
+        {!!insights.attention.length && <button className="text-button" onClick={() => setPage('papers')}>前往论文列表 <ArrowUpRight size={14} /></button>}
+      </article>
+      <article className="analysis-block publisher-block">
+        <div className="section-title"><div><p className="eyebrow">PUBLISHERS</p><h2>出版社分布</h2></div></div>
+        <div className="rank-list">
+          {publisherEntries.map(([name, value], index) => <div key={name}><span>{String(index + 1).padStart(2, '0')}</span><strong>{name}</strong><em>{value} 篇</em><i style={{ width: `${Math.max(8, (value / Math.max(...publisherEntries.map((entry) => entry[1]), 1)) * 100)}%` }} /></div>)}
+          {!publisherEntries.length && <EmptyInline text="暂无出版社数据" />}
+        </div>
+      </article>
+    </section>
+  </div>
+}
+
 function EmptyInline({ text }) {
   return <div className="empty-inline"><span>·</span>{text}</div>
 }
 
-function PapersPage({ data, onUpdate, onAddSubmission, onDeletePaper }) {
+function PapersPage({ data, onUpdate, onAddSubmission, onEdit, onDeletePaper }) {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState('all')
   const [expanded, setExpanded] = useState(null)
@@ -308,7 +379,7 @@ function PapersPage({ data, onUpdate, onAddSubmission, onDeletePaper }) {
               {isOpen && (
                 <div className="paper-detail">
                   <div className="submission-history">
-                    <div className="detail-heading"><h4>投稿记录</h4><button className="text-button" onClick={() => onAddSubmission(paper)}><Plus size={15} />新增转投</button></div>
+                    <div className="detail-heading"><h4>投稿记录</h4><div className="detail-actions"><button className="text-button" onClick={() => onEdit(paper, submission)}><Pencil size={14} />编辑信息</button><button className="text-button" onClick={() => onAddSubmission(paper)}><Plus size={15} />新增转投</button></div></div>
                     {paper.submissions.map((item, index) => {
                       const itemJournal = data.journals.find((journalItem) => journalItem.id === item.journalId)
                       return <div className="submission-chip" key={item.id}><span>{index + 1}</span><div><strong>{item.journalName}</strong><small>{formatDate(item.submittedAt)} · {item.manuscriptId || '暂无编号'}</small></div><QuartileBadge value={bestQuartile(latestMetric(itemJournal))} /><StatusPill status={item.status} /></div>
@@ -363,7 +434,7 @@ function JournalsPage({ data, onNewJournal, onImportCsv }) {
   )
 }
 
-function BackupPage({ data, onRestore, onClearDemo, onClearAll }) {
+function BackupPage({ data, onRestore, onEncrypt, onClearDemo, onClearAll }) {
   const fileRef = useRef(null)
   const exportJson = () => downloadFile(`paper-trail-backup-${today()}.json`, JSON.stringify(data, null, 2))
   const exportCsv = () => {
@@ -371,6 +442,18 @@ function BackupPage({ data, onRestore, onClearDemo, onClearAll }) {
     const rows = data.papers.flatMap((paper) => paper.submissions.map((submission) => [paper.title, paper.shortTitle, paper.role, paper.field, submission.journalName, submission.manuscriptId, submission.submittedAt, STATUS_MAP[submission.status]?.label, submission.round, submission.doi]))
     const escape = (value) => `"${String(value || '').replaceAll('"', '""')}"`
     downloadFile(`paper-trail-records-${today()}.csv`, `\ufeff${[header, ...rows].map((row) => row.map(escape).join(',')).join('\n')}`, 'text/csv;charset=utf-8')
+  }
+  const deadlines = data.papers.map((paper) => ({ paper, submission: currentSubmission(paper) })).filter(({ submission }) => {
+    const event = submission?.events?.at(-1)
+    return event?.deadline && STATUS_MAP[submission.status]?.action
+  })
+  const exportCalendar = () => {
+    const escapeIcs = (value) => String(value || '').replaceAll('\\', '\\\\').replaceAll(',', '\\,').replaceAll(';', '\\;').replaceAll('\n', '\\n')
+    const events = deadlines.map(({ paper, submission }) => {
+      const event = submission.events.at(-1)
+      return ['BEGIN:VEVENT', `UID:${submission.id}@paper-trail`, `DTSTAMP:${today().replaceAll('-', '')}T000000Z`, `DTSTART;VALUE=DATE:${event.deadline.replaceAll('-', '')}`, `SUMMARY:${escapeIcs(`修回截止：${paper.shortTitle}`)}`, `DESCRIPTION:${escapeIcs(`${submission.journalName} · ${STATUS_MAP[submission.status]?.label}${event.note ? ` · ${event.note}` : ''}`)}`, submission.url ? `URL:${submission.url}` : '', 'END:VEVENT'].filter(Boolean).join('\r\n')
+    }).join('\r\n')
+    downloadFile(`paper-trail-deadlines-${today()}.ics`, `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nCALSCALE:GREGORIAN\r\nPRODID:-//Paper Trail//Research Deadlines//ZH\r\n${events}\r\nEND:VCALENDAR`, 'text/calendar;charset=utf-8')
   }
   return (
     <section className="backup-grid">
@@ -381,9 +464,9 @@ function BackupPage({ data, onRestore, onClearDemo, onClearAll }) {
         <div className="backup-stats"><div><strong>{data.papers.length}</strong><span>篇论文</span></div><div><strong>{data.papers.reduce((sum, paper) => sum + paper.submissions.length, 0)}</strong><span>次投稿</span></div><div><strong>{data.journals.length}</strong><span>本期刊</span></div></div>
       </article>
       <div className="backup-actions-grid">
-        <article className="backup-action"><Download size={22} /><h3>完整备份</h3><p>导出包含全部历史记录的 JSON 文件，可在任何设备恢复。</p><button className="primary-button" onClick={exportJson}>导出 JSON</button></article>
-        <article className="backup-action"><BarChart3 size={22} /><h3>统计表格</h3><p>将所有投稿尝试导出为 CSV，方便在 Excel 中分析。</p><button className="secondary-button" onClick={exportCsv}>导出 CSV</button></article>
-        <article className="backup-action"><Upload size={22} /><h3>恢复数据</h3><p>从 Paper Trail 的 JSON 备份中恢复，当前数据会被替换。</p><input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={onRestore} /><button className="secondary-button" onClick={() => fileRef.current?.click()}>选择备份</button></article>
+        <article className="backup-action"><Download size={22} /><h3>完整备份</h3><p>普通 JSON 方便迁移；加密备份适合存进网盘或长期归档。</p><div className="backup-button-row"><button className="primary-button" onClick={exportJson}>导出 JSON</button><button className="secondary-button" onClick={onEncrypt}><LockKeyhole size={14} />加密</button></div></article>
+        <article className="backup-action"><BarChart3 size={22} /><h3>统计与日历</h3><p>导出 Excel 可读的投稿表，或把修回截止日期加入日历。</p><div className="backup-button-row"><button className="secondary-button" onClick={exportCsv}>CSV</button><button className="secondary-button" onClick={exportCalendar} disabled={!deadlines.length}><CalendarDays size={14} />截止日历</button></div></article>
+        <article className="backup-action"><Upload size={22} /><h3>恢复数据</h3><p>支持普通或 AES-256 加密备份；恢复前会再次确认。</p><input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={onRestore} /><button className="secondary-button" onClick={() => fileRef.current?.click()}>选择备份</button></article>
         <article className="backup-action danger"><Trash2 size={22} /><h3>清理数据</h3><p>{data.demo ? '当前包含演示数据，可以一键清空后正式使用。' : '永久清空此浏览器中的全部记录。请先导出备份。'}</p><button className="danger-button" onClick={data.demo ? onClearDemo : onClearAll}>{data.demo ? '清空演示数据' : '清空全部数据'}</button></article>
       </div>
     </section>
@@ -412,6 +495,29 @@ function NewPaperModal({ data, onClose, onSave }) {
         <Field label="当前状态"><select value={form.status} onChange={(event) => update('status', event.target.value)}>{STATUS_OPTIONS.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}</select></Field>
       </div></div>
       <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" type="submit">保存论文</button></div>
+    </form>
+  </Modal>
+}
+
+function EditPaperModal({ paper, submission, onClose, onSave }) {
+  const [form, setForm] = useState({ title: paper.title, shortTitle: paper.shortTitle, field: paper.field || '', role: paper.role, tags: (paper.tags || []).join(', '), url: submission?.url || '', manuscriptId: submission?.manuscriptId || '', submittedAt: submission?.submittedAt || '', doi: submission?.doi || '' })
+  const update = (key, value) => setForm((current) => ({ ...current, [key]: value }))
+  return <Modal title="编辑论文信息" subtitle="修改论文信息和当前投稿的基本字段。状态变化仍通过时间线记录。" onClose={onClose} wide>
+    <form className="modal-form" onSubmit={(event) => { event.preventDefault(); if (form.title.trim()) onSave(form) }}>
+      <div className="form-section"><h3>论文信息</h3><div className="form-grid">
+        <Field label="英文标题" className="span-2"><input required autoFocus value={form.title} onChange={(event) => update('title', event.target.value)} /></Field>
+        <Field label="论文简称"><input value={form.shortTitle} onChange={(event) => update('shortTitle', event.target.value)} /></Field>
+        <Field label="作者身份"><select value={form.role} onChange={(event) => update('role', event.target.value)}>{ROLE_OPTIONS.map((role) => <option key={role}>{role}</option>)}</select></Field>
+        <Field label="研究方向"><input value={form.field} onChange={(event) => update('field', event.target.value)} /></Field>
+        <Field label="标签"><input value={form.tags} onChange={(event) => update('tags', event.target.value)} /></Field>
+      </div></div>
+      {submission && <div className="form-section"><h3>当前投稿</h3><div className="form-grid">
+        <Field label="投稿网站链接" className="span-2"><input type="url" value={form.url} onChange={(event) => update('url', event.target.value)} placeholder="https://..." /></Field>
+        <Field label="Manuscript ID"><input value={form.manuscriptId} onChange={(event) => update('manuscriptId', event.target.value)} /></Field>
+        <Field label="投稿日期"><input type="date" value={form.submittedAt} onChange={(event) => update('submittedAt', event.target.value)} /></Field>
+        <Field label="DOI" className="span-2"><input value={form.doi} onChange={(event) => update('doi', event.target.value)} placeholder="10.xxxx/xxxxx" /></Field>
+      </div></div>}
+      <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" type="submit">保存修改</button></div>
     </form>
   </Modal>
 }
@@ -459,6 +565,30 @@ function NewJournalModal({ initialJournal, onClose, onSave }) {
   </Modal>
 }
 
+function BackupPasswordModal({ mode, onClose, onSubmit }) {
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const exporting = mode === 'encrypt'
+  const submit = async (event) => {
+    event.preventDefault()
+    if (password.length < 8) return setError('密码至少需要 8 个字符。')
+    if (exporting && password !== confirm) return setError('两次输入的密码不一致。')
+    setBusy(true); setError('')
+    try { await onSubmit(password) } catch { setError(exporting ? '无法创建加密备份，请稍后重试。' : '密码错误，或备份文件已经损坏。'); setBusy(false) }
+  }
+  return <Modal title={exporting ? '创建加密备份' : '解锁加密备份'} subtitle={exporting ? '使用 AES-256-GCM 加密。密码不会保存，遗失后无法恢复。' : '输入创建备份时使用的密码。'} onClose={onClose}>
+    <form className="modal-form" onSubmit={submit}>
+      <div className="encryption-note"><LockKeyhole size={18} /><div><strong>端到端本地处理</strong><span>加密和解密均在当前浏览器完成，密码不会离开设备。</span></div></div>
+      <div className="form-grid"><Field label="备份密码" className="span-2"><input autoFocus type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="至少 8 个字符" /></Field>
+      {exporting && <Field label="确认密码" className="span-2"><input type="password" autoComplete="new-password" value={confirm} onChange={(event) => setConfirm(event.target.value)} /></Field>}</div>
+      {error && <p className="form-error"><AlertTriangle size={14} />{error}</p>}
+      <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" type="submit" disabled={busy}>{busy ? '处理中…' : exporting ? '下载加密备份' : '解锁并恢复'}</button></div>
+    </form>
+  </Modal>
+}
+
 export default function App() {
   const [data, setData] = useState(null)
   const [page, setPage] = useState('dashboard')
@@ -496,6 +626,20 @@ export default function App() {
       return { ...current, journals, papers: [paper, ...current.papers] }
     })
     setModal(null); notify('论文已保存')
+  }
+
+  const savePaperEdit = (paper, submission, form) => {
+    setData((current) => ({ ...current, papers: current.papers.map((item) => item.id === paper.id ? {
+      ...item,
+      demo: false,
+      title: form.title.trim(),
+      shortTitle: form.shortTitle.trim() || form.title.trim().slice(0, 42),
+      field: form.field.trim(),
+      role: form.role,
+      tags: form.tags.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean),
+      submissions: item.submissions.map((entry) => entry.id === submission?.id ? { ...entry, url: form.url.trim(), manuscriptId: form.manuscriptId.trim(), submittedAt: form.submittedAt, doi: form.doi.trim() } : entry),
+    } : item) }))
+    setModal(null); notify('论文信息已更新')
   }
 
   const saveSubmission = (paper, form) => {
@@ -554,10 +698,23 @@ export default function App() {
     if (!file) return
     try {
       const restored = JSON.parse(await file.text())
+      if (restored?.format === 'paper-trail-encrypted') { setModal({ type: 'decrypt', backup: restored }); event.target.value = ''; return }
       if (!Array.isArray(restored.papers) || !Array.isArray(restored.journals)) throw new Error('invalid')
       if (window.confirm('恢复备份将替换当前所有数据，是否继续？')) { setData({ ...restored, demo: false }); notify('备份已恢复') }
     } catch { notify('这不是有效的 Paper Trail 备份') }
     event.target.value = ''
+  }
+
+  const exportEncrypted = async (password) => {
+    const backup = await encryptState(data, password)
+    downloadFile(`paper-trail-encrypted-${today()}.json`, JSON.stringify(backup, null, 2))
+    setModal(null); notify('加密备份已下载')
+  }
+
+  const restoreEncrypted = async (backup, password) => {
+    const restored = await decryptState(backup, password)
+    if (!Array.isArray(restored.papers) || !Array.isArray(restored.journals)) throw new Error('invalid')
+    if (window.confirm('密码正确。是否用此备份替换当前数据？')) { setData({ ...restored, demo: false }); setModal(null); notify('加密备份已恢复') }
   }
 
   if (!data) return <div className="loading-screen"><div className="brand-loader">PT</div><span>正在打开你的投稿台账…</span></div>
@@ -566,14 +723,18 @@ export default function App() {
     <AppShell page={page} setPage={setPage} data={data} onNewPaper={() => setModal({ type: 'paper' })}>
       {data.demo && <div className="demo-banner"><span>演示数据</span><p>这些记录用于展示功能。准备使用时，可前往“备份”一键清空。</p><button onClick={() => setPage('backup')}>管理数据 <ArrowUpRight size={14} /></button></div>}
       {page === 'dashboard' && <Dashboard data={data} setPage={setPage} onUpdate={(paper, submission) => setModal({ type: 'status', paper, submission })} />}
-      {page === 'papers' && <PapersPage data={data} onUpdate={(paper, submission) => setModal({ type: 'status', paper, submission })} onAddSubmission={(paper) => setModal({ type: 'submission', paper })} onDeletePaper={deletePaper} />}
+      {page === 'papers' && <PapersPage data={data} onUpdate={(paper, submission) => setModal({ type: 'status', paper, submission })} onAddSubmission={(paper) => setModal({ type: 'submission', paper })} onEdit={(paper, submission) => setModal({ type: 'edit', paper, submission })} onDeletePaper={deletePaper} />}
+      {page === 'insights' && <InsightsPage data={data} setPage={setPage} />}
       {page === 'journals' && <JournalsPage data={data} onNewJournal={(journal = null) => setModal({ type: 'journal', journal })} onImportCsv={importJcr} />}
-      {page === 'backup' && <BackupPage data={data} onRestore={restore} onClearDemo={() => { if (window.confirm('清空演示数据并保留你新增的记录？')) { setData((current) => ({ ...current, demo: false, papers: current.papers.filter((item) => !item.demo), journals: current.journals.filter((item) => !item.demo) })); notify('演示数据已清空') } }} onClearAll={() => { if (window.confirm('这会永久删除全部数据。确定继续？')) { setData(emptyState()); notify('本地数据已清空') } }} />}
+      {page === 'backup' && <BackupPage data={data} onRestore={restore} onEncrypt={() => setModal({ type: 'encrypt' })} onClearDemo={() => { if (window.confirm('清空演示数据并保留你新增的记录？')) { setData((current) => ({ ...current, demo: false, papers: current.papers.filter((item) => !item.demo), journals: current.journals.filter((item) => !item.demo) })); notify('演示数据已清空') } }} onClearAll={() => { if (window.confirm('这会永久删除全部数据。确定继续？')) { setData(emptyState()); notify('本地数据已清空') } }} />}
     </AppShell>
     {modal?.type === 'paper' && <NewPaperModal data={data} onClose={() => setModal(null)} onSave={savePaper} />}
+    {modal?.type === 'edit' && <EditPaperModal paper={modal.paper} submission={modal.submission} onClose={() => setModal(null)} onSave={(form) => savePaperEdit(modal.paper, modal.submission, form)} />}
     {modal?.type === 'submission' && <SubmissionModal data={data} paper={modal.paper} onClose={() => setModal(null)} onSave={(form) => saveSubmission(modal.paper, form)} />}
     {modal?.type === 'status' && <UpdateStatusModal paper={modal.paper} submission={modal.submission} onClose={() => setModal(null)} onSave={(form) => saveStatus(modal.paper, modal.submission, form)} />}
     {modal?.type === 'journal' && <NewJournalModal initialJournal={modal.journal} onClose={() => setModal(null)} onSave={saveJournal} />}
+    {modal?.type === 'encrypt' && <BackupPasswordModal mode="encrypt" onClose={() => setModal(null)} onSubmit={exportEncrypted} />}
+    {modal?.type === 'decrypt' && <BackupPasswordModal mode="decrypt" onClose={() => setModal(null)} onSubmit={(password) => restoreEncrypted(modal.backup, password)} />}
     {toast && <div className="toast"><CheckCircle2 size={17} />{toast}</div>}
   </>
 }

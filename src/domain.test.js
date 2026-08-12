@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { bestQuartile, buildDemoState, computeStats, parseJournalCsv } from './domain.js'
+import { bestQuartile, buildDemoState, computeInsights, computeStats, parseJournalCsv } from './domain.js'
 
 describe('paper trail domain', () => {
   it('keeps paper count separate from submission attempts', () => {
@@ -24,5 +24,12 @@ describe('paper trail domain', () => {
     const journals = parseJournalCsv(csv)
     expect(journals[0].name).toBe('Journal, Advanced')
     expect(journals[0].metrics[0].categories[0].name).toBe('Education, Scientific Disciplines')
+  })
+
+  it('computes decision-cycle and acceptance analytics', () => {
+    const insights = computeInsights(buildDemoState())
+    expect(insights.acceptanceRate).toBe(50)
+    expect(insights.medianFirstDecision).toBeGreaterThan(0)
+    expect(insights.revisionRounds).toBe(3)
   })
 })

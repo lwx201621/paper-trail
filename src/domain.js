@@ -84,6 +84,70 @@ export function computeStats(state) {
   }
 }
 
+function median(values) {
+  if (!values.length) return null
+  const sorted = [...values].sort((a, b) => a - b)
+  const middle = Math.floor(sorted.length / 2)
+  return sorted.length % 2 ? sorted[middle] : Math.round((sorted[middle - 1] + sorted[middle]) / 2)
+}
+
+export function computeInsights(state) {
+  const attempts = state.papers.flatMap((paper) => paper.submissions.map((submission) => ({ paper, submission })))
+  const current = state.papers.map((paper) => ({ paper, submission: currentSubmission(paper) })).filter((item) => item.submission)
+  const acceptedAttempts = attempts.filter(({ submission }) => STATUS_MAP[submission.status]?.accepted)
+  const rejectedAttempts = attempts.filter(({ submission }) => submission.status === 'rejected')
+  const decidedAttempts = acceptedAttempts.length + rejectedAttempts.length
+  const firstDecisionDays = []
+  const acceptanceDays = []
+  const decisionStatuses = new Set(['minor_revision', 'major_revision', 'accepted', 'rejected'])
+
+  attempts.forEach(({ submission }) => {
+    const ordered = [...submission.events].sort((a, b) => a.date.localeCompare(b.date))
+    const firstDecision = ordered.find((event) => decisionStatuses.has(event.status))
+    const accepted = ordered.find((event) => STATUS_MAP[event.status]?.accepted)
+    if (firstDecision) firstDecisionDays.push(daysBetween(submission.submittedAt, firstDecision.date))
+    if (accepted) acceptanceDays.push(daysBetween(submission.submittedAt, accepted.date))
+  })
+
+  const statusCounts = {}
+  const roleCounts = {}
+  const publisherCounts = {}
+  const attention = []
+  current.forEach(({ paper, submission }) => {
+    const status = STATUS_MAP[submission.status]
+    statusCounts[status?.label || submission.status] = (statusCounts[status?.label || submission.status] || 0) + 1
+    roleCounts[paper.role || '未标注'] = (roleCounts[paper.role || '未标注'] || 0) + 1
+    const journal = state.journals.find((item) => item.id === submission.journalId)
+    const publisher = journal?.publisher || '未知出版社'
+    publisherCounts[publisher] = (publisherCounts[publisher] || 0) + 1
+    const lastEvent = submission.events.at(-1)
+    const deadline = lastEvent?.deadline
+    if (deadline && status?.action) {
+      const remaining = Math.round((new Date(`${deadline}T00:00:00`) - new Date(`${today()}T00:00:00`)) / 86400000)
+      if (remaining < 0) attention.push({ id: `${submission.id}-overdue`, severity: 'critical', kind: '修回逾期', paper, submission, detail: `已逾期 ${Math.abs(remaining)} 天`, deadline })
+      else if (remaining <= 14) attention.push({ id: `${submission.id}-deadline`, severity: remaining <= 3 ? 'critical' : 'warning', kind: '修回临近', paper, submission, detail: `还有 ${remaining} 天`, deadline })
+    }
+    const stalledDays = daysBetween(lastEvent?.date || submission.submittedAt)
+    if (status?.active && !status?.action && stalledDays >= 60) attention.push({ id: `${submission.id}-stalled`, severity: 'warning', kind: '长期未更新', paper, submission, detail: `${stalledDays} 天`, stalledDays })
+    if (status?.active && !submission.url) attention.push({ id: `${submission.id}-link`, severity: 'info', kind: '缺少链接', paper, submission, detail: '建议补充投稿系统链接' })
+    if (!latestMetric(journal)) attention.push({ id: `${submission.id}-jcr`, severity: 'info', kind: '缺少 JCR', paper, submission, detail: '期刊尚未匹配指标' })
+  })
+
+  attention.sort((a, b) => ({ critical: 0, warning: 1, info: 2 }[a.severity] - { critical: 0, warning: 1, info: 2 }[b.severity]))
+  return {
+    acceptanceRate: decidedAttempts ? Math.round((acceptedAttempts.length / decidedAttempts) * 100) : null,
+    acceptedAttempts: acceptedAttempts.length,
+    rejectedAttempts: rejectedAttempts.length,
+    medianFirstDecision: median(firstDecisionDays),
+    medianAcceptance: median(acceptanceDays),
+    revisionRounds: attempts.reduce((sum, { submission }) => sum + submission.events.filter((event) => ['minor_revision', 'major_revision'].includes(event.status)).length, 0),
+    statusCounts,
+    roleCounts,
+    publisherCounts,
+    attention,
+  }
+}
+
 export function buildDemoState() {
   const journalA = 'journal_nature_methods'
   const journalB = 'journal_bioinformatics'
