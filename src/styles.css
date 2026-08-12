@@ -596,3 +596,77 @@ button, input, select, textarea { font-family: var(--sans); }
   .detail-actions .text-button { font-size: 0; }
   .detail-actions .text-button svg { width: 16px; height: 16px; }
 }
+
+.conference-stack { display: grid; gap: 34px; }
+.conference-summary { display: grid; grid-template-columns: repeat(5, 1fr); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.conference-summary > div { min-height: 104px; padding: 21px 22px; border-right: 1px solid var(--line); display: flex; flex-direction: column; justify-content: space-between; }
+.conference-summary > div:first-child { padding-left: 0; }
+.conference-summary > div:last-child { border-right: 0; padding-right: 0; }
+.conference-summary span { color: var(--muted); font: 700 9px/1 var(--sans); letter-spacing: .07em; text-transform: uppercase; }
+.conference-summary strong { color: var(--ink); font: 700 30px/1 var(--serif); }
+.conference-map-panel { padding-top: 27px; border-top: 1px solid var(--line); }
+.conference-map-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+.conference-map-heading h2, .conference-list-head h2 { margin: 0; color: var(--ink); font: 700 25px/1.15 var(--serif); letter-spacing: -.015em; }
+.conference-map-heading > div > p:last-child { margin: 7px 0 0; color: var(--muted); font-size: 11px; }
+.world-map-wrap { position: relative; min-height: 430px; margin-top: 10px; border-bottom: 1px solid var(--line); overflow: hidden; }
+.map-caption { position: absolute; left: 0; bottom: 17px; display: flex; align-items: center; gap: 6px; color: var(--muted); font: 9px/1 var(--sans); text-transform: uppercase; letter-spacing: .06em; pointer-events: none; }
+.map-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 10px; color: var(--muted); font-size: 11px; pointer-events: none; }
+.conference-list-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding-bottom: 18px; }
+.conference-list { border-top: 1px solid var(--line); }
+.conference-row { min-height: 106px; padding: 16px 0; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: 62px minmax(220px, 1.45fr) minmax(135px, .8fr) minmax(115px, .65fr) 85px 102px; align-items: center; gap: 18px; }
+.conference-date { align-self: stretch; border-right: 1px solid var(--line); display: flex; flex-direction: column; justify-content: center; }
+.conference-date span { color: var(--muted); font: 700 9px/1 var(--sans); letter-spacing: .11em; }
+.conference-date strong { margin-top: 6px; color: var(--ink); font: 700 19px/1 var(--serif); }
+.conference-identity { min-width: 0; }
+.conference-identity > div { display: flex; gap: 9px; margin-bottom: 5px; }
+.conference-identity > div span { color: var(--muted); font: 700 8px/1 var(--sans); letter-spacing: .07em; text-transform: uppercase; }
+.conference-identity h3 { margin: 0; color: var(--ink); font: 700 19px/1.15 var(--serif); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conference-identity p { margin: 4px 0 0; color: var(--muted); font-size: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conference-location, .conference-milestone { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.conference-location > span, .conference-milestone > span { color: var(--muted); font: 700 8px/1 var(--sans); letter-spacing: .08em; text-transform: uppercase; }
+.conference-location strong { display: flex; align-items: center; gap: 4px; color: var(--ink); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conference-milestone strong { color: var(--ink); font-size: 10px; }
+.conference-milestone small { color: var(--muted); font: 8px/1.2 var(--sans); }
+.conference-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.conference-actions .icon-button { width: 31px; height: 31px; }
+.conference-delete { width: 26px; height: 31px; border: 0; background: transparent; color: #a7abb0; display: grid; place-items: center; cursor: pointer; opacity: 0; transition: opacity .15s ease, color .15s ease; }
+.conference-row:hover .conference-delete, .conference-delete:focus-visible { opacity: 1; }
+.conference-delete:hover { color: var(--red); }
+.backup-stats { grid-template-columns: repeat(4, 1fr); }
+
+@media (max-width: 1000px) {
+  .conference-row { grid-template-columns: 55px minmax(200px, 1.3fr) minmax(120px, .8fr) 88px 95px; }
+  .conference-milestone { display: none; }
+}
+
+@media (max-width: 900px) {
+  .mobile-nav { grid-template-columns: repeat(6, 1fr); }
+  .conference-summary { grid-template-columns: repeat(5, 1fr); }
+  .conference-summary > div { min-height: 92px; padding: 17px 13px; }
+  .conference-row { grid-template-columns: 52px minmax(0, 1fr) 92px; gap: 13px; }
+  .conference-location { grid-column: 2; }
+  .conference-row > .status-pill { grid-column: 3; grid-row: 1; }
+  .conference-actions { grid-column: 3; grid-row: 2; }
+  .conference-delete { opacity: 1; }
+}
+
+@media (max-width: 640px) {
+  .conference-stack { gap: 28px; }
+  .conference-summary { grid-template-columns: repeat(5, minmax(74px, 1fr)); overflow-x: auto; }
+  .conference-summary > div, .conference-summary > div:first-child, .conference-summary > div:last-child { min-width: 74px; min-height: 86px; padding: 15px 11px; }
+  .conference-summary strong { font-size: 25px; }
+  .conference-map-heading .primary-button { width: 36px; min-width: 36px; padding: 0; font-size: 0; }
+  .conference-map-heading h2, .conference-list-head h2 { font-size: 23px; }
+  .world-map-wrap { min-height: 320px; margin-top: 4px; }
+  .world-map-wrap > div:first-child { height: 320px !important; }
+  .conference-list-head { align-items: stretch; flex-direction: column; gap: 14px; }
+  .conference-list-head .segmented-control { overflow-x: auto; }
+  .conference-row { padding: 18px 0; grid-template-columns: 45px minmax(0, 1fr) 80px; }
+  .conference-date strong { font-size: 16px; }
+  .conference-identity h3 { font-size: 17px; }
+  .conference-identity p { max-width: 190px; }
+  .conference-location strong { white-space: normal; }
+  .conference-actions .icon-button { width: 28px; }
+  .conference-actions { gap: 2px; }
+  .backup-stats { grid-template-columns: repeat(4, 1fr); gap: 8px; }
+}

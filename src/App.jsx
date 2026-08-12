@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactEChartsCore from 'echarts-for-react/lib/core'
 import * as echarts from 'echarts/core'
-import { BarChart, LineChart, PieChart } from 'echarts/charts'
-import { GridComponent, TooltipComponent } from 'echarts/components'
+import { BarChart, LineChart, PieChart, ScatterChart } from 'echarts/charts'
+import { GeoComponent, GridComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
+import { feature } from 'topojson-client'
+import countries110m from 'world-atlas/countries-110m.json'
 import {
   ArchiveRestore,
   AlertTriangle,
@@ -20,10 +22,12 @@ import {
   Download,
   ExternalLink,
   FileText,
+  Globe2,
   HardDrive,
   LayoutDashboard,
   Library,
   LockKeyhole,
+  MapPin,
   Pencil,
   Plus,
   Search,
@@ -37,6 +41,7 @@ import {
 } from 'lucide-react'
 import { loadState, saveState } from './db.js'
 import { decryptState, encryptState } from './backupCrypto.js'
+import { CITY_PRESETS, CONFERENCE_STATUS_MAP, CONFERENCE_STATUS_OPTIONS, computeConferenceStats, conferenceDateState } from './conferenceDomain.js'
 import {
   ROLE_OPTIONS,
   STATUS_MAP,
@@ -49,17 +54,20 @@ import {
   daysBetween,
   emptyState,
   latestMetric,
+  normalizeState,
   parseJournalCsv,
   today,
   uid,
 } from './domain.js'
 
-echarts.use([BarChart, LineChart, PieChart, GridComponent, TooltipComponent, CanvasRenderer])
+echarts.use([BarChart, LineChart, PieChart, ScatterChart, GeoComponent, GridComponent, TooltipComponent, CanvasRenderer])
+echarts.registerMap('paper-trail-world', feature(countries110m, countries110m.objects.countries))
 
 const NAV_ITEMS = [
   { id: 'dashboard', label: '总览', icon: LayoutDashboard },
   { id: 'papers', label: '论文', icon: FileText },
   { id: 'insights', label: '分析', icon: BarChart3 },
+  { id: 'conferences', label: '会议', icon: Globe2 },
   { id: 'journals', label: '期刊库', icon: Library },
   { id: 'backup', label: '备份', icon: ArchiveRestore },
 ]
@@ -68,6 +76,7 @@ const PAGE_META = {
   dashboard: { eyebrow: 'OVERVIEW', title: '我的投稿轨迹', subtitle: '所有论文、状态与时间，都在一处。' },
   papers: { eyebrow: 'MANUSCRIPTS', title: '论文与投稿', subtitle: '一篇论文可以拥有多次独立投稿记录。' },
   insights: { eyebrow: 'INSIGHTS', title: '研究分析', subtitle: '从投稿周期、决策结果与成果结构理解你的研究进展。' },
+  conferences: { eyebrow: 'CONFERENCES', title: '会议与足迹', subtitle: '追踪投稿节点，也看见研究将你带到哪里。' },
   journals: { eyebrow: 'JOURNAL LIBRARY', title: '期刊指标库', subtitle: '按年度保存 JCR 指标与多学科分区。' },
   backup: { eyebrow: 'LOCAL DATA', title: '数据与备份', subtitle: '数据仅保存在当前浏览器中。' },
 }
@@ -120,8 +129,13 @@ function Field({ label, children, hint, className = '' }) {
   return <label className={`field ${className}`}><span>{label}</span>{children}{hint && <small>{hint}</small>}</label>
 }
 
-function AppShell({ page, setPage, data, children, onNewPaper }) {
+function AppShell({ page, setPage, data, children, onNewPaper, onNewConference }) {
   const meta = PAGE_META[page]
+  const context = page === 'conferences'
+    ? <><span>{data.conferences.length}</span> conferences <i /> <span>{new Set(data.conferences.map((item) => item.country).filter(Boolean)).size}</span> countries</>
+    : <><span>{data.papers.length}</span> papers <i /> <span>{data.papers.reduce((sum, paper) => sum + paper.submissions.length, 0)}</span> submissions</>
+  const primaryAction = page === 'conferences' ? onNewConference : onNewPaper
+  const primaryLabel = page === 'conferences' ? '新增会议' : '新增论文'
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -137,7 +151,7 @@ function AppShell({ page, setPage, data, children, onNewPaper }) {
           </nav>
           <div className="topbar-actions">
             <div className="local-indicator"><ShieldCheck size={14} /><span>仅本地保存</span><i /></div>
-            <button className="primary-button" onClick={onNewPaper}><Plus size={16} />新增论文</button>
+            <button className="primary-button" onClick={primaryAction}><Plus size={16} />{primaryLabel}</button>
           </div>
         </div>
       </header>
@@ -145,7 +159,7 @@ function AppShell({ page, setPage, data, children, onNewPaper }) {
       <main className="main-content">
         <header className="page-header">
           <div><p className="eyebrow">{meta.eyebrow}</p><h1>{meta.title}<span>.</span></h1><p>{meta.subtitle}</p></div>
-          <div className="page-context"><span>{data.papers.length}</span> papers <i /> <span>{data.papers.reduce((sum, paper) => sum + paper.submissions.length, 0)}</span> submissions</div>
+          <div className="page-context">{context}</div>
         </header>
         {children}
       </main>
@@ -405,6 +419,104 @@ function PapersPage({ data, onUpdate, onAddSubmission, onEdit, onDeletePaper }) 
   )
 }
 
+function ConferenceStatusPill({ status }) {
+  const meta = CONFERENCE_STATUS_MAP[status] || { label: status || '未设置', tone: 'neutral' }
+  return <span className={`status-pill status-${meta.tone}`}><span />{meta.label}</span>
+}
+
+function conferenceMilestone(conference) {
+  const dates = [
+    ['截稿', conference.submissionDeadline],
+    ['通知', conference.notificationDate],
+    ['定稿', conference.cameraReadyDate],
+    ['举办', conference.startDate],
+  ].filter(([, date]) => date).sort((a, b) => a[1].localeCompare(b[1]))
+  const future = dates.find(([, date]) => date >= today())
+  return future || dates.at(-1) || ['日期待定', '']
+}
+
+function ConferencesPage({ data, onNew, onEdit, onDelete }) {
+  const conferences = data.conferences || []
+  const [filter, setFilter] = useState('active')
+  const stats = useMemo(() => computeConferenceStats(conferences), [conferences])
+  const visible = useMemo(() => conferences.filter((conference) => {
+    if (filter === 'active') return !['completed', 'rejected', 'withdrawn'].includes(conference.status)
+    if (filter === 'accepted') return ['accepted', 'registered', 'attending', 'completed'].includes(conference.status)
+    if (filter === 'deadline') {
+      const { deadlineDays } = conferenceDateState(conference)
+      return deadlineDays != null && deadlineDays >= 0 && deadlineDays <= 90
+    }
+    return true
+  }).sort((a, b) => (a.submissionDeadline || a.startDate || '9999').localeCompare(b.submissionDeadline || b.startDate || '9999')), [conferences, filter])
+  const mapData = conferences.filter((item) => Number.isFinite(Number(item.longitude)) && Number.isFinite(Number(item.latitude))).map((item) => ({
+    name: item.acronym || item.name,
+    value: [Number(item.longitude), Number(item.latitude), 1],
+    city: item.city,
+    country: item.country,
+    status: CONFERENCE_STATUS_MAP[item.status]?.label || item.status,
+  }))
+  const mapOption = {
+    animationDuration: 800,
+    tooltip: {
+      trigger: 'item', renderMode: 'richText', backgroundColor: '#20242b', borderWidth: 0, padding: [9, 11], textStyle: { color: '#fff', fontSize: 11 },
+      formatter: (params) => `${params.name}\n${params.data?.city || ''}${params.data?.country ? ` · ${params.data.country}` : ''}\n${params.data?.status || ''}`,
+    },
+    geo: {
+      map: 'paper-trail-world', roam: true, zoom: 1.12, top: 12, bottom: 8, left: 5, right: 5,
+      scaleLimit: { min: 1, max: 5 },
+      itemStyle: { areaColor: '#f1f2f4', borderColor: '#d6d9de', borderWidth: .6 },
+      emphasis: { itemStyle: { areaColor: '#e7e9ed' }, label: { show: false } },
+      select: { disabled: true },
+    },
+    series: [{
+      type: 'scatter', coordinateSystem: 'geo', data: mapData, symbolSize: 10,
+      itemStyle: { color: '#20242b', borderColor: '#fff', borderWidth: 2, shadowColor: 'rgba(32,36,43,.22)', shadowBlur: 8 },
+      emphasis: { scale: 1.5, itemStyle: { color: '#d46a13' } },
+    }],
+  }
+
+  return <div className="conference-stack">
+    <section className="conference-summary">
+      <div><span>会议记录</span><strong>{stats.total}</strong></div>
+      <div><span>即将举行</span><strong>{stats.upcoming}</strong></div>
+      <div><span>已接收</span><strong>{stats.accepted}</strong></div>
+      <div><span>60 天内截稿</span><strong>{stats.deadlineSoon}</strong></div>
+      <div><span>国家与地区</span><strong>{stats.countries}</strong></div>
+    </section>
+
+    <section className="conference-map-panel">
+      <div className="conference-map-heading"><div><p className="eyebrow">RESEARCH FOOTPRINT</p><h2>世界会议地图</h2><p>拖动浏览，滚轮缩放。地点数据只保存在本地。</p></div><button className="primary-button small" onClick={() => onNew()}><Plus size={15} />新增会议</button></div>
+      <div className="world-map-wrap">
+        <ReactEChartsCore echarts={echarts} option={mapOption} style={{ height: 430, width: '100%' }} />
+        {!mapData.length && <div className="map-empty"><MapPin size={21} /><span>添加带坐标的会议后，这里会形成你的研究足迹。</span></div>}
+        <div className="map-caption"><Globe2 size={14} /><span>{mapData.length} 个地点</span></div>
+      </div>
+    </section>
+
+    <section className="conference-list-section">
+      <div className="conference-list-head">
+        <div><p className="eyebrow">CALENDAR</p><h2>会议时间线</h2></div>
+        <div className="segmented-control">{[['active', '进行中'], ['deadline', '临近截稿'], ['accepted', '已接收'], ['all', '全部']].map(([value, label]) => <button key={value} className={filter === value ? 'active' : ''} onClick={() => setFilter(value)}>{label}</button>)}</div>
+      </div>
+      <div className="conference-list">
+        {visible.map((conference) => {
+          const [milestone, milestoneDate] = conferenceMilestone(conference)
+          const { deadlineDays } = conferenceDateState(conference)
+          return <article className="conference-row" key={conference.id}>
+            <div className="conference-date"><span>{conference.startDate ? new Date(`${conference.startDate}T00:00:00`).toLocaleString('en', { month: 'short' }).toUpperCase() : 'TBD'}</span><strong>{conference.startDate?.slice(0, 4) || '—'}</strong></div>
+            <div className="conference-identity"><div><span>{conference.field || '未分类'}</span>{conference.tier && <span>{conference.tier}</span>}</div><h3>{conference.acronym || conference.name}</h3><p>{conference.name}</p></div>
+            <div className="conference-location"><span>地点</span><strong><MapPin size={13} />{[conference.city, conference.country].filter(Boolean).join(' · ') || '待定'}</strong></div>
+            <div className="conference-milestone"><span>下一节点</span><strong>{milestone}</strong><small>{formatDate(milestoneDate)}{milestone === '截稿' && deadlineDays != null && deadlineDays >= 0 ? ` · ${deadlineDays} 天` : ''}</small></div>
+            <ConferenceStatusPill status={conference.status} />
+            <div className="conference-actions">{conference.url && <a href={conference.url} target="_blank" rel="noreferrer" className="icon-button" aria-label="打开会议网站"><ExternalLink size={15} /></a>}<button className="icon-button" onClick={() => onEdit(conference)} aria-label="编辑会议"><Pencil size={15} /></button><button className="conference-delete" onClick={() => onDelete(conference)} aria-label="删除会议"><Trash2 size={14} /></button></div>
+          </article>
+        })}
+        {!visible.length && <div className="empty-state"><Globe2 size={28} /><h3>这个视图还没有会议</h3><p>新增会议或切换筛选条件。</p></div>}
+      </div>
+    </section>
+  </div>
+}
+
 function JournalsPage({ data, onNewJournal, onImportCsv }) {
   const fileRef = useRef(null)
   const [query, setQuery] = useState('')
@@ -443,16 +555,19 @@ function BackupPage({ data, onRestore, onEncrypt, onClearDemo, onClearAll }) {
     const escape = (value) => `"${String(value || '').replaceAll('"', '""')}"`
     downloadFile(`paper-trail-records-${today()}.csv`, `\ufeff${[header, ...rows].map((row) => row.map(escape).join(',')).join('\n')}`, 'text/csv;charset=utf-8')
   }
-  const deadlines = data.papers.map((paper) => ({ paper, submission: currentSubmission(paper) })).filter(({ submission }) => {
+  const paperDeadlines = data.papers.map((paper) => ({ paper, submission: currentSubmission(paper) })).filter(({ submission }) => {
     const event = submission?.events?.at(-1)
     return event?.deadline && STATUS_MAP[submission.status]?.action
   })
+  const conferenceDeadlines = (data.conferences || []).filter((conference) => conference.submissionDeadline)
   const exportCalendar = () => {
     const escapeIcs = (value) => String(value || '').replaceAll('\\', '\\\\').replaceAll(',', '\\,').replaceAll(';', '\\;').replaceAll('\n', '\\n')
-    const events = deadlines.map(({ paper, submission }) => {
+    const revisionEvents = paperDeadlines.map(({ paper, submission }) => {
       const event = submission.events.at(-1)
       return ['BEGIN:VEVENT', `UID:${submission.id}@paper-trail`, `DTSTAMP:${today().replaceAll('-', '')}T000000Z`, `DTSTART;VALUE=DATE:${event.deadline.replaceAll('-', '')}`, `SUMMARY:${escapeIcs(`修回截止：${paper.shortTitle}`)}`, `DESCRIPTION:${escapeIcs(`${submission.journalName} · ${STATUS_MAP[submission.status]?.label}${event.note ? ` · ${event.note}` : ''}`)}`, submission.url ? `URL:${submission.url}` : '', 'END:VEVENT'].filter(Boolean).join('\r\n')
-    }).join('\r\n')
+    })
+    const meetingEvents = conferenceDeadlines.map((conference) => ['BEGIN:VEVENT', `UID:${conference.id}@paper-trail`, `DTSTAMP:${today().replaceAll('-', '')}T000000Z`, `DTSTART;VALUE=DATE:${conference.submissionDeadline.replaceAll('-', '')}`, `SUMMARY:${escapeIcs(`会议截稿：${conference.acronym || conference.name}`)}`, `DESCRIPTION:${escapeIcs(`${conference.name}${conference.city ? ` · ${conference.city}` : ''}`)}`, conference.url ? `URL:${conference.url}` : '', 'END:VEVENT'].filter(Boolean).join('\r\n'))
+    const events = [...revisionEvents, ...meetingEvents].join('\r\n')
     downloadFile(`paper-trail-deadlines-${today()}.ics`, `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nCALSCALE:GREGORIAN\r\nPRODID:-//Paper Trail//Research Deadlines//ZH\r\n${events}\r\nEND:VCALENDAR`, 'text/calendar;charset=utf-8')
   }
   return (
@@ -461,11 +576,11 @@ function BackupPage({ data, onRestore, onEncrypt, onClearDemo, onClearAll }) {
         <div className="backup-icon"><HardDrive size={28} /></div>
         <p className="eyebrow">YOUR DATA, YOUR DEVICE</p><h2>没有服务器，也没有账户。</h2>
         <p>论文、投稿链接与 JCR 数据保存在此浏览器的 IndexedDB 中。GitHub 仓库和 Pages 部署不会包含这些内容。</p>
-        <div className="backup-stats"><div><strong>{data.papers.length}</strong><span>篇论文</span></div><div><strong>{data.papers.reduce((sum, paper) => sum + paper.submissions.length, 0)}</strong><span>次投稿</span></div><div><strong>{data.journals.length}</strong><span>本期刊</span></div></div>
+        <div className="backup-stats"><div><strong>{data.papers.length}</strong><span>篇论文</span></div><div><strong>{data.papers.reduce((sum, paper) => sum + paper.submissions.length, 0)}</strong><span>次投稿</span></div><div><strong>{data.conferences.length}</strong><span>场会议</span></div><div><strong>{data.journals.length}</strong><span>本期刊</span></div></div>
       </article>
       <div className="backup-actions-grid">
         <article className="backup-action"><Download size={22} /><h3>完整备份</h3><p>普通 JSON 方便迁移；加密备份适合存进网盘或长期归档。</p><div className="backup-button-row"><button className="primary-button" onClick={exportJson}>导出 JSON</button><button className="secondary-button" onClick={onEncrypt}><LockKeyhole size={14} />加密</button></div></article>
-        <article className="backup-action"><BarChart3 size={22} /><h3>统计与日历</h3><p>导出 Excel 可读的投稿表，或把修回截止日期加入日历。</p><div className="backup-button-row"><button className="secondary-button" onClick={exportCsv}>CSV</button><button className="secondary-button" onClick={exportCalendar} disabled={!deadlines.length}><CalendarDays size={14} />截止日历</button></div></article>
+        <article className="backup-action"><BarChart3 size={22} /><h3>统计与日历</h3><p>导出 Excel 可读的投稿表，或把修回和会议截稿加入日历。</p><div className="backup-button-row"><button className="secondary-button" onClick={exportCsv}>CSV</button><button className="secondary-button" onClick={exportCalendar} disabled={!paperDeadlines.length && !conferenceDeadlines.length}><CalendarDays size={14} />截止日历</button></div></article>
         <article className="backup-action"><Upload size={22} /><h3>恢复数据</h3><p>支持普通或 AES-256 加密备份；恢复前会再次确认。</p><input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={onRestore} /><button className="secondary-button" onClick={() => fileRef.current?.click()}>选择备份</button></article>
         <article className="backup-action danger"><Trash2 size={22} /><h3>清理数据</h3><p>{data.demo ? '当前包含演示数据，可以一键清空后正式使用。' : '永久清空此浏览器中的全部记录。请先导出备份。'}</p><button className="danger-button" onClick={data.demo ? onClearDemo : onClearAll}>{data.demo ? '清空演示数据' : '清空全部数据'}</button></article>
       </div>
@@ -518,6 +633,45 @@ function EditPaperModal({ paper, submission, onClose, onSave }) {
         <Field label="DOI" className="span-2"><input value={form.doi} onChange={(event) => update('doi', event.target.value)} placeholder="10.xxxx/xxxxx" /></Field>
       </div></div>}
       <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" type="submit">保存修改</button></div>
+    </form>
+  </Modal>
+}
+
+function ConferenceModal({ conference, onClose, onSave }) {
+  const [form, setForm] = useState({
+    name: conference?.name || '', acronym: conference?.acronym || '', field: conference?.field || '', tier: conference?.tier || '', status: conference?.status || 'watching',
+    city: conference?.city || '', country: conference?.country || '', longitude: conference?.longitude ?? '', latitude: conference?.latitude ?? '',
+    submissionDeadline: conference?.submissionDeadline || '', notificationDate: conference?.notificationDate || '', cameraReadyDate: conference?.cameraReadyDate || '',
+    startDate: conference?.startDate || '', endDate: conference?.endDate || '', url: conference?.url || '', notes: conference?.notes || '',
+  })
+  const [preset, setPreset] = useState('')
+  const update = (key, value) => setForm((current) => ({ ...current, [key]: value }))
+  const chooseCity = (value) => {
+    setPreset(value)
+    const location = CITY_PRESETS.find((item) => `${item.city}|${item.country}` === value)
+    if (location) setForm((current) => ({ ...current, ...location }))
+  }
+  return <Modal title={conference ? '编辑会议' : '新增会议'} subtitle="记录投稿节点和会址；地图坐标只在本地使用。" onClose={onClose} wide>
+    <form className="modal-form" onSubmit={(event) => { event.preventDefault(); if (form.name.trim()) onSave(form) }}>
+      <div className="form-section"><h3>会议信息</h3><div className="form-grid">
+        <Field label="会议全称" className="span-2"><input required autoFocus value={form.name} onChange={(event) => update('name', event.target.value)} placeholder="Society for Research in Child Development Biennial Meeting" /></Field>
+        <Field label="简称"><input value={form.acronym} onChange={(event) => update('acronym', event.target.value)} placeholder="SRCD 2027" /></Field>
+        <Field label="当前状态"><select value={form.status} onChange={(event) => update('status', event.target.value)}>{CONFERENCE_STATUS_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></Field>
+        <Field label="研究领域"><input value={form.field} onChange={(event) => update('field', event.target.value)} placeholder="Child Development" /></Field>
+        <Field label="会议等级"><input value={form.tier} onChange={(event) => update('tier', event.target.value)} placeholder="如：CCF A / International" /></Field>
+        <Field label="会议网站" className="span-2"><input type="url" value={form.url} onChange={(event) => update('url', event.target.value)} placeholder="https://..." /></Field>
+      </div></div>
+      <div className="form-section"><h3>地点与地图</h3><div className="form-grid">
+        <Field label="常用会议城市" className="span-2"><select value={preset} onChange={(event) => chooseCity(event.target.value)}><option value="">手动填写或选择城市</option>{CITY_PRESETS.map((item) => <option key={`${item.city}-${item.country}`} value={`${item.city}|${item.country}`}>{item.city} · {item.country}</option>)}</select></Field>
+        <Field label="城市"><input value={form.city} onChange={(event) => update('city', event.target.value)} /></Field><Field label="国家或地区"><input value={form.country} onChange={(event) => update('country', event.target.value)} /></Field>
+        <Field label="经度"><input type="number" step="any" min="-180" max="180" value={form.longitude} onChange={(event) => update('longitude', event.target.value)} placeholder="-180 至 180" /></Field><Field label="纬度"><input type="number" step="any" min="-90" max="90" value={form.latitude} onChange={(event) => update('latitude', event.target.value)} placeholder="-90 至 90" /></Field>
+      </div></div>
+      <div className="form-section"><h3>关键日期</h3><div className="form-grid">
+        <Field label="投稿截止"><input type="date" value={form.submissionDeadline} onChange={(event) => update('submissionDeadline', event.target.value)} /></Field><Field label="结果通知"><input type="date" value={form.notificationDate} onChange={(event) => update('notificationDate', event.target.value)} /></Field>
+        <Field label="定稿截止"><input type="date" value={form.cameraReadyDate} onChange={(event) => update('cameraReadyDate', event.target.value)} /></Field><Field label="会议开始"><input type="date" value={form.startDate} onChange={(event) => update('startDate', event.target.value)} /></Field>
+        <Field label="会议结束"><input type="date" value={form.endDate} onChange={(event) => update('endDate', event.target.value)} /></Field><Field label="备注"><input value={form.notes} onChange={(event) => update('notes', event.target.value)} placeholder="摘要、差旅或注册信息" /></Field>
+      </div></div>
+      <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" type="submit">{conference ? '保存修改' : '添加会议'}</button></div>
     </form>
   </Modal>
 }
@@ -596,7 +750,7 @@ export default function App() {
   const [toast, setToast] = useState('')
 
   useEffect(() => {
-    loadState().then((stored) => setData(stored || buildDemoState())).catch(() => setData(buildDemoState()))
+    loadState().then((stored) => setData(stored ? normalizeState(stored) : buildDemoState())).catch(() => setData(buildDemoState()))
   }, [])
 
   useEffect(() => {
@@ -655,6 +809,24 @@ export default function App() {
     setModal(null); notify('状态时间线已更新')
   }
 
+  const saveConference = (conference, form) => {
+    const record = {
+      ...(conference || { id: uid('conference') }), demo: false,
+      name: form.name.trim(), acronym: form.acronym.trim(), field: form.field.trim(), tier: form.tier.trim(), status: form.status,
+      city: form.city.trim(), country: form.country.trim(), longitude: form.longitude === '' ? null : Number(form.longitude), latitude: form.latitude === '' ? null : Number(form.latitude),
+      submissionDeadline: form.submissionDeadline, notificationDate: form.notificationDate, cameraReadyDate: form.cameraReadyDate,
+      startDate: form.startDate, endDate: form.endDate, url: form.url.trim(), notes: form.notes.trim(),
+    }
+    setData((current) => ({ ...current, conferences: conference ? current.conferences.map((item) => item.id === conference.id ? record : item) : [record, ...current.conferences] }))
+    setModal(null); notify(conference ? '会议信息已更新' : '会议已添加到地图')
+  }
+
+  const deleteConference = (conference) => {
+    if (!window.confirm(`确定删除「${conference.acronym || conference.name}」吗？`)) return
+    setData((current) => ({ ...current, conferences: current.conferences.filter((item) => item.id !== conference.id) }))
+    notify('会议已删除')
+  }
+
   const saveJournal = (form) => {
     const category = form.category.trim() ? [{ name: form.category.trim(), quartile: form.quartile, rank: Number(form.rank) || null, total: Number(form.total) || null }] : []
     setData((current) => {
@@ -700,7 +872,7 @@ export default function App() {
       const restored = JSON.parse(await file.text())
       if (restored?.format === 'paper-trail-encrypted') { setModal({ type: 'decrypt', backup: restored }); event.target.value = ''; return }
       if (!Array.isArray(restored.papers) || !Array.isArray(restored.journals)) throw new Error('invalid')
-      if (window.confirm('恢复备份将替换当前所有数据，是否继续？')) { setData({ ...restored, demo: false }); notify('备份已恢复') }
+      if (window.confirm('恢复备份将替换当前所有数据，是否继续？')) { setData({ ...normalizeState(restored), demo: false }); notify('备份已恢复') }
     } catch { notify('这不是有效的 Paper Trail 备份') }
     event.target.value = ''
   }
@@ -714,22 +886,24 @@ export default function App() {
   const restoreEncrypted = async (backup, password) => {
     const restored = await decryptState(backup, password)
     if (!Array.isArray(restored.papers) || !Array.isArray(restored.journals)) throw new Error('invalid')
-    if (window.confirm('密码正确。是否用此备份替换当前数据？')) { setData({ ...restored, demo: false }); setModal(null); notify('加密备份已恢复') }
+    if (window.confirm('密码正确。是否用此备份替换当前数据？')) { setData({ ...normalizeState(restored), demo: false }); setModal(null); notify('加密备份已恢复') }
   }
 
   if (!data) return <div className="loading-screen"><div className="brand-loader">PT</div><span>正在打开你的投稿台账…</span></div>
 
   return <>
-    <AppShell page={page} setPage={setPage} data={data} onNewPaper={() => setModal({ type: 'paper' })}>
+    <AppShell page={page} setPage={setPage} data={data} onNewPaper={() => setModal({ type: 'paper' })} onNewConference={() => setModal({ type: 'conference' })}>
       {data.demo && <div className="demo-banner"><span>演示数据</span><p>这些记录用于展示功能。准备使用时，可前往“备份”一键清空。</p><button onClick={() => setPage('backup')}>管理数据 <ArrowUpRight size={14} /></button></div>}
       {page === 'dashboard' && <Dashboard data={data} setPage={setPage} onUpdate={(paper, submission) => setModal({ type: 'status', paper, submission })} />}
       {page === 'papers' && <PapersPage data={data} onUpdate={(paper, submission) => setModal({ type: 'status', paper, submission })} onAddSubmission={(paper) => setModal({ type: 'submission', paper })} onEdit={(paper, submission) => setModal({ type: 'edit', paper, submission })} onDeletePaper={deletePaper} />}
       {page === 'insights' && <InsightsPage data={data} setPage={setPage} />}
+      {page === 'conferences' && <ConferencesPage data={data} onNew={() => setModal({ type: 'conference' })} onEdit={(conference) => setModal({ type: 'conference', conference })} onDelete={deleteConference} />}
       {page === 'journals' && <JournalsPage data={data} onNewJournal={(journal = null) => setModal({ type: 'journal', journal })} onImportCsv={importJcr} />}
-      {page === 'backup' && <BackupPage data={data} onRestore={restore} onEncrypt={() => setModal({ type: 'encrypt' })} onClearDemo={() => { if (window.confirm('清空演示数据并保留你新增的记录？')) { setData((current) => ({ ...current, demo: false, papers: current.papers.filter((item) => !item.demo), journals: current.journals.filter((item) => !item.demo) })); notify('演示数据已清空') } }} onClearAll={() => { if (window.confirm('这会永久删除全部数据。确定继续？')) { setData(emptyState()); notify('本地数据已清空') } }} />}
+      {page === 'backup' && <BackupPage data={data} onRestore={restore} onEncrypt={() => setModal({ type: 'encrypt' })} onClearDemo={() => { if (window.confirm('清空演示数据并保留你新增的记录？')) { setData((current) => ({ ...current, demo: false, papers: current.papers.filter((item) => !item.demo), journals: current.journals.filter((item) => !item.demo), conferences: current.conferences.filter((item) => !item.demo) })); notify('演示数据已清空') } }} onClearAll={() => { if (window.confirm('这会永久删除全部数据。确定继续？')) { setData(emptyState()); notify('本地数据已清空') } }} />}
     </AppShell>
     {modal?.type === 'paper' && <NewPaperModal data={data} onClose={() => setModal(null)} onSave={savePaper} />}
     {modal?.type === 'edit' && <EditPaperModal paper={modal.paper} submission={modal.submission} onClose={() => setModal(null)} onSave={(form) => savePaperEdit(modal.paper, modal.submission, form)} />}
+    {modal?.type === 'conference' && <ConferenceModal conference={modal.conference} onClose={() => setModal(null)} onSave={(form) => saveConference(modal.conference, form)} />}
     {modal?.type === 'submission' && <SubmissionModal data={data} paper={modal.paper} onClose={() => setModal(null)} onSave={(form) => saveSubmission(modal.paper, form)} />}
     {modal?.type === 'status' && <UpdateStatusModal paper={modal.paper} submission={modal.submission} onClose={() => setModal(null)} onSave={(form) => saveStatus(modal.paper, modal.submission, form)} />}
     {modal?.type === 'journal' && <NewJournalModal initialJournal={modal.journal} onClose={() => setModal(null)} onSave={saveJournal} />}

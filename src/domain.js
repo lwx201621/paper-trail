@@ -1,3 +1,5 @@
+import { demoConferences } from './conferenceDomain.js'
+
 export const STATUS_OPTIONS = [
   { value: 'submitted', label: '已提交', tone: 'neutral', active: true },
   { value: 'technical_check', label: '技术检查', tone: 'neutral', active: true },
@@ -261,12 +263,17 @@ export function buildDemoState() {
         ],
       },
     ],
+    conferences: demoConferences(),
     preferences: { quartileMode: 'best', jcrMode: 'latest' },
   }
 }
 
 export function emptyState() {
-  return { version: 1, demo: false, journals: [], papers: [], preferences: { quartileMode: 'best', jcrMode: 'latest' } }
+  return { version: 1, demo: false, journals: [], papers: [], conferences: [], preferences: { quartileMode: 'best', jcrMode: 'latest' } }
+}
+
+export function normalizeState(state) {
+  return { ...emptyState(), ...state, papers: state?.papers || [], journals: state?.journals || [], conferences: state?.conferences || [] }
 }
 
 export function parseJournalCsv(text, existing = []) {
